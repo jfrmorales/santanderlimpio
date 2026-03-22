@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Santander Basuras - Estado en Tiempo Real</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+
+    #map { width: 100%; height: 100vh; }
+
+    /* Header overlay */
+    .header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(12px);
+      padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    .header h1 { font-size: 18px; font-weight: 700; color: #f8fafc; }
+    .header h1 span { color: #38bdf8; }
+    .header-stats { display: flex; gap: 16px; font-size: 13px; color: #94a3b8; }
+    .header-stats .stat { display: flex; align-items: center; gap: 5px; }
+    .header-stats .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* Legend */
+    .legend {
+      position: fixed; bottom: 24px; left: 24px; z-index: 1000;
+      background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(12px);
+      border-radius: 12px; padding: 14px 18px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      font-size: 12px;
+    }
+    .legend h3 { font-size: 13px; margin-bottom: 8px; color: #f8fafc; }
+    .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .legend-color { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+
+    /* Filter panel */
+    .filters {
+      position: fixed; top: 60px; right: 24px; z-index: 1000;
+      background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(12px);
+      border-radius: 12px; padding: 14px 18px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      font-size: 13px;
+    }
+    .filters h3 { font-size: 13px; margin-bottom: 10px; color: #f8fafc; }
+    .filter-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; margin: 2px; border-radius: 20px;
+      border: 1px solid rgba(148, 163, 184, 0.3); background: transparent;
+      color: #94a3b8; cursor: pointer; font-size: 12px; transition: all 0.2s;
+    }
+    .filter-btn.active { background: rgba(56, 189, 248, 0.15); border-color: #38bdf8; color: #38bdf8; }
+    .filter-btn:hover { border-color: #64748b; }
+    .filter-btn .icon { font-size: 14px; }
+
+    .filter-section { margin-bottom: 10px; }
+    .filter-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+
+    /* Loading */
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: #0f172a; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      transition: opacity 0.5s;
+    }
+    .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    .spinner { width: 48px; height: 48px; border: 3px solid #1e293b; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { margin-top: 16px; color: #94a3b8; font-size: 14px; }
+    .loading-progress { margin-top: 8px; color: #64748b; font-size: 12px; }
+
+    /* Popup */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 23, 42, 0.95) !important; color: #e2e8f0 !important;
+      border-radius: 10px !important; border: 1px solid rgba(148, 163, 184, 0.15) !important;
+      backdrop-filter: blur(12px);
+    }
+    .leaflet-popup-tip { background: rgba(15, 23, 42, 0.95) !important; }
+    .popup-content { font-size: 13px; line-height: 1.6; }
+    .popup-content h4 { font-size: 15px; color: #f8fafc; margin-bottom: 6px; }
+    .popup-content .type-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 12px;
+      font-size: 11px; font-weight: 600; margin-bottom: 8px;
+    }
+    .popup-content .fill-bar { height: 6px; border-radius: 3px; background: #1e293b; margin: 6px 0; overflow: hidden; }
+    .popup-content .fill-bar-inner { height: 100%; border-radius: 3px; transition: width 0.3s; }
+    .popup-content .detail { display: flex; justify-content: space-between; padding: 2px 0; }
+    .popup-content .detail-label { color: #64748b; }
+    .popup-content .detail-value { color: #f8fafc; font-weight: 500; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .header h1 { font-size: 15px; }
+      .header-stats { display: none; }
+      .filters { top: 56px; right: 8px; left: 8px; }
+      .legend { bottom: 12px; left: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">Cargando contenedores de Santander...</div>
+    <div class="loading-progress" id="loadingProgress">Conectando con API...</div>
+  </div>
+
+  <div class="header">
+    <h1>🗑️ <span>Santander</span> Basuras</h1>
+    <div class="header-stats">
+      <div class="stat"><div class="dot" style="background:#22c55e"></div> <span id="statTotal">-</span> contenedores</div>
+      <div class="stat"><div class="dot" style="background:#38bdf8"></div> <span id="statSensors">-</span> con sensor</div>
+      <div class="stat" id="statUpdate" style="display:none">Actualizado: <span id="statTime">-</span></div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <h3>Filtros</h3>
+    <div class="filter-section">
+      <div class="filter-label">Tipo de residuo</div>
+      <div id="typeFilters"></div>
+    </div>
+    <div class="filter-section">
+      <div class="filter-label">Estado</div>
+      <button class="filter-btn active" data-filter="all" onclick="toggleFillFilter('all')">Todos</button>
+      <button class="filter-btn" data-filter="sensor" onclick="toggleFillFilter('sensor')">Con sensor</button>
+      <button class="filter-btn" data-filter="full" onclick="toggleFillFilter('full')">Llenos (>80%)</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h3>Nivel de llenado</h3>
+    <div class="legend-item"><div class="legend-color" style="background:#22c55e"></div> Bajo (&lt;40%)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#eab308"></div> Medio (40-70%)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#f97316"></div> Alto (70-90%)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Lleno (&gt;90%)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#64748b"></div> Sin sensor</div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script>
+    // --- Config ---
+    const WASTE_TYPES = {
+      'Organico':  { icon: '🟤', color: '#a16207', label: 'Orgánico' },
+      'Envases':   { icon: '🟡', color: '#eab308', label: 'Envases' },
+      'Papel':     { icon: '🔵', color: '#3b82f6', label: 'Papel/Cartón' },
+      'Vidrio':    { icon: '🟢', color: '#22c55e', label: 'Vidrio' },
+      'Resto':     { icon: '⚫', color: '#64748b', label: 'Resto' },
+    };
+
+    function getFillColor(level) {
+      if (level === null || level === undefined) return '#64748b';
+      if (level < 40) return '#22c55e';
+      if (level < 70) return '#eab308';
+      if (level < 90) return '#f97316';
+      return '#ef4444';
+    }
+
+    function getFillLabel(level) {
+      if (level === null || level === undefined) return 'Sin datos';
+      if (level < 40) return 'Bajo';
+      if (level < 70) return 'Medio';
+      if (level < 90) return 'Alto';
+      return 'Lleno';
+    }
+
+    // --- State ---
+    let allContainers = [];
+    let activeTypes = new Set(Object.keys(WASTE_TYPES));
+    let activeFillFilter = 'all';
+    let markers;
+    let map;
+
+    // --- Map init ---
+    map = L.map('map', { zoomControl: false }).setView([43.4623, -3.8100], 14);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a> | Datos: <a href="http://datos.santander.es">Santander Open Data</a>',
+      maxZoom: 19
+    }).addTo(map);
+
+    markers = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      iconCreateFunction: function(cluster) {
+        const count = cluster.getChildCount();
+        let size = count < 50 ? 'small' : count < 200 ? 'medium' : 'large';
+        let dim = size === 'small' ? 36 : size === 'medium' ? 44 : 52;
+        return L.divIcon({
+          html: `<div style="background:rgba(56,189,248,0.2);border:2px solid #38bdf8;border-radius:50%;width:${dim}px;height:${dim}px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#38bdf8">${count}</div>`,
+          className: '', iconSize: [dim, dim]
+        });
+      }
+    });
+    map.addLayer(markers);
+
+    // --- Build type filter buttons ---
+    const typeFiltersEl = document.getElementById('typeFilters');
+    Object.entries(WASTE_TYPES).forEach(([key, val]) => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn active';
+      btn.dataset.type = key;
+      btn.innerHTML = `<span class="icon">${val.icon}</span> ${val.label}`;
+      btn.onclick = () => toggleTypeFilter(key, btn);
+      typeFiltersEl.appendChild(btn);
+    });
+
+    function toggleTypeFilter(type, btn) {
+      if (activeTypes.has(type)) { activeTypes.delete(type); btn.classList.remove('active'); }
+      else { activeTypes.add(type); btn.classList.add('active'); }
+      renderMarkers();
+    }
+
+    function toggleFillFilter(filter) {
+      activeFillFilter = filter;
+      document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+      renderMarkers();
+    }
+
+    // --- Fetch all data ---
+    async function fetchAllContainers() {
+      const progress = document.getElementById('loadingProgress');
+      let all = [];
+      let page = 1;
+      const perPage = 500;
+
+      while (true) {
+        progress.textContent = `Cargando página ${page}...`;
+        const res = await fetch(`/api/contenedores?items=${perPage}&page=${page}`);
+        const data = await res.json();
+        if (!data.resources || data.resources.length === 0) break;
+        all = all.concat(data.resources);
+        if (all.length >= data.summary.items) break;
+        page++;
+      }
+
+      return all;
+    }
+
+    // --- Create marker ---
+    function createMarker(c) {
+      const lat = parseFloat(c['ayto:latitud']);
+      const lng = parseFloat(c['ayto:longitud']);
+      if (isNaN(lat) || isNaN(lng)) return null;
+
+      const fill = c['ayto:nivelLlenado'] ? parseFloat(c['ayto:nivelLlenado']) : null;
+      const temp = c['ayto:temperatura'] ? parseFloat(c['ayto:temperatura']).toFixed(1) : null;
+      const type = c['ayto:residuo'] || 'Resto';
+      const typeInfo = WASTE_TYPES[type] || WASTE_TYPES['Resto'];
+      const color = getFillColor(fill);
+      const hasSensor = !!c['ayto:codigoSensor'];
+
+      const icon = L.divIcon({
+        html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:2.5px solid ${typeInfo.color};box-shadow:0 0 6px ${color}44;"></div>`,
+        className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+      });
+
+      const marker = L.marker([lat, lng], { icon });
+
+      const fillBar = fill !== null
+        ? `<div class="fill-bar"><div class="fill-bar-inner" style="width:${fill}%;background:${color}"></div></div>`
+        : '';
+      const fillText = fill !== null ? `${fill}% — ${getFillLabel(fill)}` : 'Sin sensor';
+      const tempText = temp !== null ? `${temp}°C` : '—';
+      const modified = c['dc:modified'] ? new Date(c['dc:modified']).toLocaleString('es-ES') : '—';
+
+      marker.bindPopup(`
+        <div class="popup-content">
+          <h4>${typeInfo.icon} ${c['dc:identifier']}</h4>
+          <span class="type-badge" style="background:${typeInfo.color}33;color:${typeInfo.color}">${typeInfo.label}</span>
+          <div class="detail"><span class="detail-label">Dirección</span></div>
+          <div class="detail"><span class="detail-value">${c['ayto:direccion'] || '—'}</span></div>
+          <div class="detail"><span class="detail-label">Nivel de llenado</span><span class="detail-value">${fillText}</span></div>
+          ${fillBar}
+          <div class="detail"><span class="detail-label">Temperatura</span><span class="detail-value">${tempText}</span></div>
+          <div class="detail"><span class="detail-label">Capacidad</span><span class="detail-value">${c['ayto:capacidad'] ? c['ayto:capacidad'] + 'L' : '—'}</span></div>
+          <div class="detail"><span class="detail-label">Estado</span><span class="detail-value">${c['ayto:estadoConservacion'] || '—'}</span></div>
+          <div class="detail"><span class="detail-label">Actualizado</span><span class="detail-value">${modified}</span></div>
+        </div>
+      `, { maxWidth: 280 });
+
+      marker._containerData = { type, fill, hasSensor };
+      return marker;
+    }
+
+    // --- Render markers based on filters ---
+    function renderMarkers() {
+      markers.clearLayers();
+      let shown = 0;
+      allContainers.forEach(c => {
+        const type = c['ayto:residuo'] || 'Resto';
+        const fill = c['ayto:nivelLlenado'] ? parseFloat(c['ayto:nivelLlenado']) : null;
+        const hasSensor = !!c['ayto:codigoSensor'];
+
+        if (!activeTypes.has(type)) return;
+        if (activeFillFilter === 'sensor' && !hasSensor) return;
+        if (activeFillFilter === 'full' && (fill === null || fill < 80)) return;
+
+        const m = createMarker(c);
+        if (m) { markers.addLayer(m); shown++; }
+      });
+    }
+
+    // --- Stats ---
+    function updateStats() {
+      const total = allContainers.length;
+      const withSensor = allContainers.filter(c => !!c['ayto:codigoSensor']).length;
+      document.getElementById('statTotal').textContent = total.toLocaleString('es-ES');
+      document.getElementById('statSensors').textContent = withSensor.toLocaleString('es-ES');
+      document.getElementById('statUpdate').style.display = 'flex';
+      document.getElementById('statTime').textContent = new Date().toLocaleTimeString('es-ES');
+    }
+
+    // --- Init ---
+    async function init() {
+      try {
+        allContainers = await fetchAllContainers();
+        updateStats();
+        renderMarkers();
+        document.getElementById('loading').classList.add('hidden');
+        setTimeout(() => document.getElementById('loading').remove(), 600);
+
+        // Auto-refresh every 2 minutes
+        setInterval(async () => {
+          try {
+            allContainers = await fetchAllContainers();
+            updateStats();
+            renderMarkers();
+          } catch (e) { console.error('Refresh failed:', e); }
+        }, 120000);
+      } catch (e) {
+        document.getElementById('loadingProgress').textContent = 'Error al conectar con la API. Reintentando...';
+        setTimeout(init, 5000);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

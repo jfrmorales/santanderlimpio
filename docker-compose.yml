@@ -1,0 +1,16 @@
+services:
+  santander-basuras:
+    build: .
+    container_name: santander-basuras
+    restart: unless-stopped
+    networks:
+      - santander-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  santander-net:
+    name: santander-net
